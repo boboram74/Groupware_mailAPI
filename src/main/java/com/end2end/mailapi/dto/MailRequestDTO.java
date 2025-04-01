@@ -5,11 +5,13 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@Getter @Setter
+@Setter
+@Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class MemberDTO {
-
-    private String name;
-    private String password;
+public class MailRequestDTO {
+    private String from;
+    private String to;
+    private String subject;
+    private String text;
 }

@@ -7,5 +7,5 @@ public interface MailService {
     int addEmployee(EmployeeDTO dto);
     void receive(String mail, MultipartFile[] files);
     void deleteEmployee(String employee);
-    void sendMail(String from, String to, String subject, String text);
+    void sendMail(String email, MultipartFile[] files) throws Exception;
 }

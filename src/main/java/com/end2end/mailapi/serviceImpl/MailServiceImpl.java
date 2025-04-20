@@ -1,39 +1,48 @@
 package com.end2end.mailapi.serviceImpl;
 
+import com.end2end.mailapi.dao.FileDAO;
 import com.end2end.mailapi.dao.MailDAO;
-import com.end2end.mailapi.dto.EmployeeDTO;
-import com.end2end.mailapi.dto.MailDTO;
+import com.end2end.mailapi.dto.*;
 import com.end2end.mailapi.service.MailService;
 import com.end2end.mailapi.util.MailUtil;
 import com.end2end.mailapi.util.SecurityUtil;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.mail.internet.InternetAddress;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.mail.SimpleMailMessage;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import jakarta.mail.*;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeUtility;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+
+import static org.springframework.util.StringUtils.cleanPath;
 
 @Service
 public class MailServiceImpl implements MailService {
 
     @Autowired
-    MailDAO mailDAO;
+    private MailDAO mailDAO;
+
+    @Autowired
+    private FileDAO fileDAO;
+
     @Autowired
     private JavaMailSender mailSender;
 
+    @Override
     public int addEmployee(EmployeeDTO dto) {
-        if (!dto.getName().matches("^[a-z_][a-z0-9_-]{0,31}$")) {
-            System.out.println("[에러]유효하지 않은 계정명: " + dto.getName());
-            return 0;
-        }
         String passwod = SecurityUtil.hashPassword(dto.getPassword());
         String cmd = String.format("useradd -m -s /sbin/nologin %s && echo '%s:%s' | chpasswd -e",
                 dto.getName(), dto.getName(), passwod);
@@ -47,10 +56,35 @@ public class MailServiceImpl implements MailService {
             return 0;
         }
     }
+    @Override
+    public void sendMail(String mail, MultipartFile[] files) throws Exception{
+        ObjectMapper mapper = new ObjectMapper();
+        MailRequestDTO dto = mapper.readValue(mail, MailRequestDTO.class);
 
+        boolean hasFiles = files != null && files.length > 0;
+        MimeMessage mimeMessage = mailSender.createMimeMessage();
+        MimeMessageHelper mimeMessageHelper = new MimeMessageHelper(mimeMessage, hasFiles, "UTF-8");
+
+        mimeMessageHelper.setFrom(dto.getFrom());
+        mimeMessageHelper.setTo(dto.getTo());
+        mimeMessageHelper.setSubject(dto.getSubject());
+        mimeMessageHelper.setText(dto.getText(), false);
+
+        if(hasFiles) {
+            for (MultipartFile file : files) {
+                if(!file.isEmpty()) {
+                    String fileName = cleanPath(file.getOriginalFilename());
+                    mimeMessageHelper.addAttachment(fileName, new ByteArrayResource(file.getBytes()));
+                }
+            }
+        }
+        mailSender.send(mimeMessage);
+    }
+
+    @Transactional
     @Override
     public void receive(String mail, MultipartFile[] files) {
-        System.out.println("메일 본문 : "+mail);
+        //System.out.println("메일 본문 : "+mail);
         try {
             InputStream is = new ByteArrayInputStream(mail.getBytes(StandardCharsets.UTF_8));
             Session session = Session.getDefaultInstance(new java.util.Properties());
@@ -84,24 +118,47 @@ public class MailServiceImpl implements MailService {
             System.out.println("제목: " + mailDTO.getTitle());
             System.out.println("본문: " + mailDTO.getContent());
             int mailId =  mailDAO.receive(mailDTO);
-            System.out.println("ID : "+mailId);
+            RestTemplate restTemplate = new RestTemplate();
+            String url = "http://34.47.99.32/mail/alarm?mailId=" + mailId + "&email=" + mailDTO.getRecipient_email();
+            String response = restTemplate.getForObject(url, String.class);
+            System.out.println("응답: " + response);
+
+            List<Integer> result = mailDAO.findByList(mailDTO.getRecipient_email());
+            for(int i=0; i<result.size(); i++) {
+                mailDAO.insertState(mailId, result.get(i));
+            }
             int atIndex = recipient.indexOf("@");
             String account = null;
             if (atIndex != -1) {
                 account = recipient.substring(0, atIndex);
             }
             String uploadPath = "/home/"+account+"/file/";
-            MailUtil.saveAttachments(message, uploadPath);
+            List<FileDTO> fileList = MailUtil.saveAttachments(message, uploadPath);
+            List<Integer> fileIds = new ArrayList<>();
+            for (FileDTO fileDto : fileList) {
+                FileMapperDTO dtoMapper = FileMapperDTO.builder()
+                        .mailId(mailId)
+                        .build();
+                fileDAO.insert(dtoMapper);
+                int fileId = dtoMapper.getId();
+                fileIds.add(fileId);
+
+                FileDetailDTO detailDto = FileDetailDTO.builder()
+                        .fileId(fileId)
+                        .originFilename(fileDto.getOriName())
+                        .systemFilename(fileDto.getSysName())
+                        .path(fileDto.getPath())
+                        .filesize(fileDto.getSize())
+                        .build();
+                fileDAO.insertDetail(detailDto);
+            }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
     @Override
     public void deleteEmployee(String employee) {
-        if (!employee.matches("^[a-z_][a-z0-9_-]{0,31}$")) {
-            System.out.println("[에러] 유효하지 않은 계정명: " + employee);
-            return;
-        }
         String cmd = String.format("userdel -r %s", employee);
         try {
             Process process = new ProcessBuilder("/bin/bash", "-c", cmd).start();
@@ -112,13 +169,4 @@ public class MailServiceImpl implements MailService {
         }
     }
 
-    @Override
-    public void sendMail(String from, String to, String subject, String text) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(from);
-        message.setTo(to);
-        message.setSubject(subject);
-        message.setText(text);
-        mailSender.send(message);
-    }
 }

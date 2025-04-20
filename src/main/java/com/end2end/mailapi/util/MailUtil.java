@@ -1,5 +1,6 @@
 package com.end2end.mailapi.util;
 
+import com.end2end.mailapi.dto.FileDTO;
 import jakarta.mail.BodyPart;
 import jakarta.mail.Message;
 import jakarta.mail.Multipart;
@@ -9,6 +10,8 @@ import jakarta.mail.internet.MimeUtility;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MailUtil {
 
@@ -42,7 +45,8 @@ public class MailUtil {
         }
         return null;
     }
-    public static void saveAttachments(Message message, String uploadPath) throws Exception {
+    public static List<FileDTO> saveAttachments(Message message, String uploadPath) throws Exception {
+        List<FileDTO> fileList = new ArrayList<>();
         Object content = message.getContent();
         if (content instanceof Multipart) {
             Multipart multipart = (Multipart) content;
@@ -61,7 +65,6 @@ public class MailUtil {
                         fileName = "attachment_" + i;
                     }
                     String oriName = fileName;
-                    System.out.println(oriName+"설정한 oriName입니다.");
                     String sysName = java.util.UUID.randomUUID() + "_" + fileName;
                     File file = new File(uploadDir, sysName);
                     long totalBytes = 0;
@@ -73,12 +76,13 @@ public class MailUtil {
                             fos.write(buffer, 0, bytesRead);
                             totalBytes += bytesRead;
                         }
-                        double actualSizeMB = totalBytes / (1024.0 * 1024.0);
-                        System.out.println("첨부파일 저장됨: " + file.getAbsolutePath());
-                        System.out.println(String.format("첨부파일 실제 사이즈: %.2f MB", actualSizeMB));
+                        String fullFilePath = uploadPath + sysName;
+                        FileDTO fileDto = new FileDTO(0, oriName, sysName, fullFilePath, totalBytes);
+                        fileList.add(fileDto);
                     }
                 }
             }
         }
+        return fileList;
     }
 }

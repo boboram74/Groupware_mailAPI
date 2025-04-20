@@ -4,6 +4,14 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="file">
     <insert id="insert">
-        insert into files (id, mailId) values (file_seq.nextval, #{mailId})
+        insert into files (id, emailId) values (FILES_ID_SEQ.nextval, #{mailId})
+        <selectKey order="AFTER" keyProperty="id" resultType="int" >
+            select FILES_ID_SEQ.currval from dual
+        </selectKey>
+    </insert>
+
+    <insert id="insertDetail">
+        INSERT INTO file_detail (id, filesid, originfilename, systemfilename, path, filesize, regdate)
+        VALUES (file_detail_id_seq.nextval, #{fileId}, #{originFilename}, #{systemFilename}, #{path}, #{filesize}, SYSDATE)
     </insert>
 </mapper>
